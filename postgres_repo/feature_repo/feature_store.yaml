@@ -22,6 +22,7 @@ online_store:
   db_schema: public
   user: tuser
   password: "12345"
+  sslmode: disable
 
 offline_store:
   type: postgres
@@ -31,5 +32,6 @@ offline_store:
   db_schema: public
   user: tuser
   password: "12345"
+  sslmode: disable
 
 entity_key_serialization_version: 3
