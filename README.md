@@ -2,13 +2,13 @@
 
 ## Цель проекта
 
-Собрать минимальный воспроизводимый MLOps-контур для учебного эксперимента:
+Цель проекта — собрать минимальный воспроизводимый MLOps-контур для учебного эксперимента:
 
 - код версионируется через Git;
 - данные и артефакты версионируются через DVC;
-- обучение оформлено как DVC-пайплайн из стадий `prepare` и `train`;
-- параметры, метрики и артефакты эксперимента логируются в MLflow;
-- для задания по Feature Store подготовлен `feature_store.yaml` на основе шаблона `postgres`.
+- обучение оформлено как DVC-пайплайн;
+- параметры и метрики логируются в MLflow;
+- подготовлена конфигурация Feature Store.
 
 ## Структура проекта
 
@@ -16,11 +16,11 @@
 .
 ├── data/
 │   ├── raw/
+│   │   └── data.csv.dvc
 │   └── processed/
-├── feature_repo/
-│   └── feature_store.yaml
-├── models/
-├── reports/
+├── postgres_repo/
+│   └── feature_repo/
+│       └── feature_store.yaml
 ├── src/
 │   ├── prepare.py
 │   └── train.py
@@ -32,41 +32,39 @@
 
 ## Как запустить
 
-```powershell
+после клонирования/скачивания репозитория
+
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+
 pip install -r requirements.txt
 dvc pull
 dvc repro
-mlflow ui --backend-store-uri ./mlruns
+
+mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
-Команды проверялись в PowerShell на Windows. В `dvc.yaml` стадии запускаются через локальный интерпретатор `.venv\Scripts\python`.
+MLflow UI будет доступен по адресу:
 
-MLflow UI по умолчанию будет доступен по адресу `http://127.0.0.1:5000`.
-
-Если на Windows DVC выдаст ошибку доступа к `C:\ProgramData\iterative`, перед запуском можно один раз выполнить:
-
-```powershell
-$env:DVC_NO_ANALYTICS='1'
-$env:DVC_GLOBAL_CONFIG_DIR="$PWD\\.dvc_global"
-$env:DVC_SYSTEM_CONFIG_DIR="$PWD\\.dvc_system"
-$env:DVC_SITE_CACHE_DIR="$PWD\\.dvc_site_cache"
+```text
+http://127.0.0.1:5000
 ```
 
 ## Краткое описание пайплайна
 
-1. Сырые данные `data/raw/data.csv` добавлены в DVC, а не в Git.
-2. Стадия `prepare` читает исходный CSV, удаляет дубликаты и пропуски, делит выборку на `train/test` и сохраняет результат в `data/processed/`.
-3. Стадия `train` обучает `RandomForestClassifier`, сохраняет модель в `models/model.pkl`, метрики в `reports/metrics.json` и график матрицы ошибок в `reports/confusion_matrix.png`.
-4. Во время обучения MLflow логирует параметры, метрики и артефакты.
+В проекте реализован DVC-пайплайн из двух стадий:
 
-## Где смотреть UI MLflow
+1. `prepare` — читает исходные данные, выполняет базовую обработку, делит данные на train/test и сохраняет результат в `data/processed/`.
+2. `train` — обучает модель `LogisticRegression`, сохраняет модель в `model.pkl` и логирует параметры и метрики в MLflow.
 
-После выполнения команды:
+Параметры эксперимента вынесены в `params.yaml`.
+
+## Где смотреть MLflow
+
+После запуска команды:
 
 ```powershell
-mlflow ui --backend-store-uri ./mlruns
+mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
 откройте в браузере:
@@ -75,60 +73,42 @@ mlflow ui --backend-store-uri ./mlruns
 http://127.0.0.1:5000
 ```
 
+В MLflow отображаются параметры модели, метрика `accuracy` и артефакт `model.pkl`.
+
 ## Feature Store
 
-Для шага 3 в проект добавлен файл [`feature_repo/feature_store.yaml`](feature_repo/feature_store.yaml), настроенный по образцу `feast init ... --template postgres`.
+В проекте используется Feast. Конфигурация находится в файле:
 
-В конфигурации используются:
-
-- PostgreSQL как `registry`;
-- PostgreSQL как `offline_store`;
-- PostgreSQL как `online_store`.
-
-Локальная проверка конфигурации выполнялась командами:
-
-```powershell
-python -m yamllint feature_repo/feature_store.yaml
-feast -c feature_repo configuration
+```text
+postgres_repo/feature_repo/feature_store.yaml
 ```
 
-## Ограничения Colab по сравнению с Marimo
+В конфигурации используется PostgreSQL для `registry`, `online_store` и `offline_store`.
 
-Краткий вывод для ноутбука:
+Для локального запуска PostgreSQL можно использовать Docker:
 
-- в Colab легко нарушить порядок выполнения ячеек, из-за чего состояние среды становится неявным;
-- зависимости и временные файлы живут только в рамках сессии, поэтому DevOps-часть воспроизводить сложнее;
-- `.ipynb` хуже подходит для code review и git diff;
-- `marimo` удобнее для оформления воспроизводимого `.py`-файла с явными зависимостями между ячейками.
+```powershell
+docker run --name feast-postgres -e POSTGRES_USER=tuser -e POSTGRES_PASSWORD=12345 -e POSTGRES_DB=mydb -p 5433:5432 -d postgres:16
+```
 
-## Готовность ML-системы к production
+Запуск Feast UI:
 
-Текущий проект является учебным прототипом и частично готов к переносу в production:
+```powershell
+feast -c postgres_repo/feature_repo ui --host 127.0.0.1 --port 8889
+```
 
-- уже есть контроль версий кода, данных, параметров и результатов обучения;
-- есть разбиение пайплайна на этапы и логирование экспериментов;
-- есть заготовка Feature Store.
+Feast UI будет доступен по адресу:
 
-Для полноценного production-развертывания пока не хватает:
+```text
+http://127.0.0.1:8889
+```
 
-- автоматических тестов;
-- CI/CD;
-- контейнеризации;
-- мониторинга качества данных и модели;
-- управления секретами;
-- отдельного сервиса инференса и схемы отката модели.
+## Схема ML-системы для размытия лиц
 
-## Схема ML-системы для заблюривания лиц
+Схема ML-системы для размытия лиц на видео приведена в ноутбуке:
 
-Для шага 5 схема описана в ноутбуке `HW5_MLOps_Panfilova_Tatiana.ipynb`. В ней выделены следующие блоки:
+```text
+HW5_MLOps_Panfilova_Tatiana.ipynb
+```
 
-- источник видео;
-- покадровая обработка;
-- детекция лиц;
-- модуль размытия найденных областей;
-- сборка итогового видео;
-- сохранение и выдача результата пользователю.
-
-## Примечание по DVC remote
-
-Для удобства проверки домашнего задания remote настроен как локальное хранилище `dvc_storage` внутри репозитория. Это позволяет выполнить `dvc pull` сразу после клонирования проекта без дополнительной настройки внешнего облачного хранилища.
+В схеме показаны основные этапы: загрузка видео, разбиение на кадры, параллельная обработка, детекция лиц, размытие найденных областей, сборка итогового видео и сохранение результата.
